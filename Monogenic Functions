@@ -1,0 +1,227 @@
+###### Functions and Values for use in Gene-Editing Simulatins #####
+
+
+### LIBRARIES ###               
+library (plyr)
+library (dplyr)
+library (purrr)
+library (tidyverse)
+library(faux)
+
+################## PARAMETERS/VALUES #########################
+AgeDist <- c(0.092,0.055,0.07,0.09,0.115,0.147,0.189,0.242) ###
+indexSD <- 10
+littersize <- 12 ### Increase within functions for simulated 'embryo flushing'
+AgeFirstMate <- 8
+FarrowInt <- 5
+rem <- AgeFirstMate - FarrowInt #### rem = 3. Use %% to select for breeding every 5 months ######
+
+
+### MI = 0.375 & 0.4 ### EP = 0.6 & 0.25 
+### AAVex = 0.9 & 0.15 ### AAVi = 0.2 & 0.75
+
+Edit_Efficiency <- 0.375
+Embryo_Survival <-0.4
+GermLineMos <-1
+Accuracy <- 1
+
+
+########
+
+CreatePiglets <- function (sires, dams, indexSD, genNo, label, littersize){
+  nP <- length(dams$ID)*littersize ###
+  piglets <- setNames(data.frame(matrix(nrow = nP, ncol =12)), c("ID", "gen", "herd", "sex", "merit", "genoA", "age", "fate", "sire", "dam", "IAV", "EditTrials"))
+  
+  siresOrdered <- sires %>% filter(age >= AgeFirstMate) %>% arrange(desc(merit))
+  siresOrdered2 <- sample(1:length(siresOrdered$ID), length(dams$ID), replace = TRUE)
+  siresOrdered2 <- sires[c(siresOrdered2), ]  ####### Creates a list of sires and repeats for the length of the dams vector. Hard selection on males causes repeat use
+  
+  # split the sire and dam genotypes into the separate alleles - A 
+  sgA <- siresOrdered2$genoA
+  s1A <- substr(sgA, 1, 1)
+  s2A <- substr(sgA, 3, 3)
+  dgA <- dams$genoA
+  d1A <- substr(dgA, 1, 1)
+  d2A <- substr(dgA, 3, 3)
+  # Sample which allele of the PRRS resistant genotype is inherited from each parent
+  sireAlleleA <- sample(c(1,2),nP,replace = TRUE)
+  damAlleleA <- sample(c(1,2),nP,replace = TRUE)
+  
+  
+  piglets$ID <- paste0(label, seq(1:nP)) ## label in function as unique identifier ###
+  piglets$gen <- genNo ##generation associated to loop
+  piglets$herd <- siresOrdered2$herd ## Male herd assignation defines tier with no upwards movement in pyramid. 
+  piglets$sex <- sample (c("M", "F"), nP, replace = TRUE, prob = c(0.5, 0.5))
+  piglets$merit <- 0.5 * (siresOrdered2$TBV + dams$TBV) + rnorm(nP, 0, indexSD) %>% round(digits = 1) ## average merit of sire and dam with random variation. Sorted according to merit and then TBV asigned to piglets. Both values retained in dataframe
+  piglets$genoA <- paste(ifelse(sireAlleleA==1,s1A,s2A),ifelse(damAlleleA==1,d1A,d2A), sep = "/") ##pasting the alleles selected from boar and dam
+  piglets$age <- -3  ## -3 for creation of piglet and 3 months gestation
+  piglets$fate <- 1 
+  piglets$sire <- siresOrdered2$ID 
+  piglets$dam <- dams$ID
+  piglets$IAV <- ifelse(piglets$genoA == "a/a", "0", "1") ## $10 is cost of IAV/pig
+  piglets$EditTrials <- 0 # changes to 1 for editing trial has occured
+  piglets$TBV <- piglets$merit #create new column for TBV - new function adjusts this afterwards
+  
+  
+  return(piglets)
+}
+
+#### Phenotype/TBV function ### 
+
+TBV <- function(piglets){  ## conversion of the EBV to the True Breeding Value
+  
+  piglets$TBV <- rnorm_pre(piglets$TBV, ### TBV is still merit at this stage
+                           mu = mean(piglets$TBV),
+                           sd = sd(piglets$TBV),
+                           r =  Accuracy, ## this is the ACCURACY of selection 
+                           empirical = FALSE)  
+  ### TRUE will always be exact correlation, FALSE has variation that is more likely to exist in a breeding program ###
+  
+  return (piglets)
+}
+
+
+### AGEING FUNCTION ##
+
+ageing <- function (popdata){
+  popdata$age <- popdata$age + 1
+  
+  alive_pigs <- sum(nrow(popdata))
+  
+  if (nrow(popdata[popdata$sex == "M" & popdata$age > 38, ]) > 0) {popdata[popdata$sex == "M" & popdata$age > 38,]$fate <- 0} 
+  if (nrow(popdata[popdata$sex == "F" & popdata$age > 42, ]) > 0) {popdata[popdata$sex == "F" & popdata$age > 42,]$fate <- 0} ### 42 for females to allow for weaing after piglets creation at 38 months
+  
+  popdata_mort <- popdata %>% filter(age > 1)     ### No killing off piglets before they are weaned # time to allow for genomic assesment after birth
+  popdata_mort$mort <- runif(nrow(popdata_mort)) ### uniform distribution between 1 and 0 randomly assigned
+  popdata_mort <- top_frac(popdata_mort, 0.975, mort) ### removes 2.5% of population over the age of 1 
+  popdata_mort$mort <- NULL
+  popdata_piglets <- popdata %>% filter(age <= 1) 
+  popdata <- rbind (popdata_piglets, popdata_mort) ## rebind piglets and undead pigs again 
+  
+  popdata <- filter(popdata, fate == 1) ## only alive pigs retained
+  
+  dead_pigs <- alive_pigs - sum(nrow(popdata)) # count pig deaths
+  
+  print(paste0 ("Died:", dead_pigs))
+  
+  return (popdata)
+}
+
+
+##### MI gene editing function ###########
+
+edit_genes <- function(popdata, Edit_Efficiency, Embryo_Survival, GermLineMos) { 
+  
+  A_ToEdit <- filter(popdata, genoA %in% c("A/A", "A/a", "a/A"))
+  A_Others <- filter (popdata , genoA == "a/a")
+  
+  if (nrow(A_ToEdit) >= 1){
+    
+    A_ToEdit <- separate(A_ToEdit, genoA, into = c("A_Allele1", "A_Allele2"), sep = "/", remove = TRUE) %>% mutate(A_Allele1 = as.character(A_Allele1), A_Allele2 = as.character(A_Allele2))
+    
+    #  SELECTION OF PIGS ON MERIT ## would need to be on sires and dams the selection, not on the progeny
+    # A_ToEdit <- arrange(A_ToEdit, desc(merit)) #%>% top_frac(0.5) # filter out top_frac if only certain animals are to be edited? filter sires/dams, can't select on piglets as we don't know merit!?
+    
+    A_ToEditA1 <- A_ToEdit  %>% filter(A_Allele1 == "A") %>% sample_frac(Edit_Efficiency, replace = FALSE) %>% sample_frac(GermLineMos, replace=FALSE) ## Split columns as alleles are edited separately
+    A_ToEditA1$A_Allele1 <- tolower(A_ToEditA1$A_Allele1) 
+    A_ToEditA1$A_Allele2 <- NULL
+    A_ToEditA2 <- A_ToEdit  %>% filter(A_Allele2 == "A") %>% sample_frac(Edit_Efficiency, replace = FALSE) %>% sample_frac(GermLineMos, replace=FALSE)
+    A_ToEditA2$A_Allele2 <- tolower(A_ToEditA2$A_Allele2) 
+    A_ToEditA2$A_Allele1 <- NULL
+    
+    A_ToEditJoinA1 <- A_ToEditA1 %>% dplyr::select(ID, A_Allele1) ### ID as identifier and allele only selected from dataframes
+    A_ToEditJoinA2 <- A_ToEditA2 %>% dplyr::select(ID, A_Allele2)
+    
+    A_ToEdit$A_Allele1 <- NULL 
+    A_ToEdit$A_Allele2 <- NULL
+    
+    ## Bind Alleles back together by ID match. replace NA (non-succesfully edited alleles) with A. ### Both alleles put back together in a single column
+    A_ToEdit <- A_ToEdit %>% left_join (A_ToEditJoinA1, by = "ID") %>% left_join(A_ToEditJoinA2, by = "ID") 
+    A_ToEdit [c("A_Allele1", "A_Allele2")][is.na(A_ToEdit[c("A_Allele1", "A_Allele2")])] <- "A" 
+    A_ToEdit <- A_ToEdit %>% unite(col = genoA, c(A_Allele1, A_Allele2), sep = "/", remove = TRUE) 
+    
+    # A_ToEdit$EditTrials <- 1
+    
+  } ## end of if function for A ########
+  
+
+  if (nrow(A_ToEdit) >=1) {
+    
+    EditedZygotes <- A_ToEdit %>% dplyr::select(ID, genoA) ### ID as identifier and allele only selected from dataframes
+    EditedZygotes$EditTrials <- 1
+    
+    EditedZygotes$mort <- runif(nrow(EditedZygotes)) ### New column. Random, even 0-1 distribution to all piglets
+    SurvivingZygotes <- top_frac(EditedZygotes, Embryo_Survival, mort) ### selects top 60% of mort column in popdata. Set in function for embryo survival 
+    SurvivingZygotes$mort <- NULL 
+    SurvivingZygotes$fate <- "1"
+    SurvivingZygotes ["genoA"][is.na(SurvivingZygotes[c("genoA")])] <- "A/A" 
+    
+    
+    DeadZygotes <- anti_join(EditedZygotes, SurvivingZygotes, by = "ID")
+    DeadZygotes$fate <- "0"
+    DeadZygotes$mort <- NULL 
+    
+    Resistant <- filter(popdata, genoA == "a/a") %>% dplyr::select(ID, genoA, EditTrials, fate)
+    AllZygotes <- rbind(SurvivingZygotes, DeadZygotes, Resistant)# %>% left_join(Resistant, by = "ID") %>% distinct ()
+    
+    popdata <- popdata %>% dplyr::select(-genoA, -EditTrials, -fate)
+    
+    popdata <- left_join(AllZygotes, popdata, by = "ID")
+  }
+  
+  popdata$IAV <- ifelse(popdata$genoA == "a/a", "0", "1") ## $10 is cost of IAV/pig
+  
+  return (popdata)  } 
+
+
+########### gestation separator and selection ###########
+## option for culling to ensure pigs culled are distributed throughout a population to maintain breeding numbers ####
+
+GestationCull <- function(popdata, popmax){  ### 7 gestation periods for sows
+  popdataSows <- filter(popdata, sex == "F" & age > AgeFirstMate)
+  popdataSows$gest <- ((popdataSows$age - AgeFirstMate) / FarrowInt)+1 ### splits into gestation groups
+  popdataSows$gest <- floor(popdataSows$gest)
+  popdataSows <- split(popdataSows, popdataSows$gest) ## forms lists with the different gestations
+  
+  popdataSows <- lapply(popdataSows, function(x) top_n(x, popmax, merit))   # lapply, applys to each element of the list. unlist function. 
+  popdataSows <- bind_rows(popdataSows)
+  
+  popdataSows$Gest <- NULL
+}
+
+
+BreedSelection_n <- function (popdata, selection){
+  
+  popdata$Rank <- ifelse(popdata$genoA == "A/A" , 0,
+                         ifelse(popdata$genoA == "A/a" , 100,
+                                ifelse(popdata$genoA == "a/A" , 100,
+                                       ifelse(popdata$genoA == "a/a" , 200, 0))))
+                                             
+  
+  popdata <- arrange(popdata,-Rank, -merit)
+  popdata <- subset(popdata[1:selection, ]) %>% na.omit ()
+  
+  popdata$Rank <- NULL
+  
+  return (popdata)
+  
+}
+
+######### BREED SELECTION FRACTION #########
+
+BreedSelection_frac <- function (popdata, selection){
+  
+  popdata$Rank <- ifelse(popdata$genoA == "A/A" , 0,
+                         ifelse(popdata$genoA == "A/a" , 100,
+                                ifelse(popdata$genoA == "a/A" , 100,
+                                       ifelse(popdata$genoA == "a/a" , 200, 0))))
+                  
+  
+  popdata <- arrange(popdata,-Rank, -merit) 
+  popdata <- top_frac(popdata, selection, Rank) %>% na.omit ()
+  
+  popdata$Rank <- NULL
+  
+  return (popdata)
+  
+}
