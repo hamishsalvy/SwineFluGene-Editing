@@ -1,9 +1,3 @@
-# FORWARD SIMULATION WITH EDITING
-
-BurnIn_SPF <- read.csv("BurnIn_SPFpop2021-01-21.csv")
-BurnIn_Prod <- read.csv("BurnIn_ProdPop2021-01-21.csv")
-BurnIn_Mult <- read.csv("BurnIn_MultPop2021-01-21.csv")
-BurnIn_BW <- read.csv("BurnIn_BWpop2021-01-21.csv")
 
 BurnIn <- list(SPFpop = BurnIn_SPF, ProdPop = BurnIn_Prod, MultPop = BurnIn_Mult, BWpop = BurnIn_BW)
 
@@ -27,10 +21,6 @@ for (i in 1:10) {
   MultPop <- select(MultPop, -X, -genoB)
   BWpop <- select(BWpop, -X, -genoB)
   
-  SPFpop$TBV<- SPFpop$merit
-  ProdPop$TBV<- ProdPop$merit
-  MultPop$TBV<- MultPop$merit
-  BWpop$TBV<- BWpop$merit
   
   for (g in 1:120){
     
@@ -57,7 +47,6 @@ for (i in 1:10) {
       
       newGenSPFNucA <- newGenSPFNucA %>% filter (fate == "1")
       
-      newGenSPFNucA <- TBV(newGenSPFNucA) ### converting of merit into TBV
       
       SPFNucA_Fem <- filter(newGenSPFNucA, sex == "F") %>% top_n(200, merit) ## merit selection here
       SPFNucA_Fem1 <- newGenSPFNucA %>% filter(genoA == "a/a" & sex == "F")  %>% top_n(200, merit) 
@@ -93,7 +82,6 @@ for (i in 1:10) {
       
       newGenSPFNucB <- newGenSPFNucB %>% filter (fate == "1")
       
-      newGenSPFNucB <- TBV(newGenSPFNucB) ### converting of merit into TBV
       
       SPFNucB_Fem <- filter(newGenSPFNucB, sex == "F") %>% top_n(200, merit) ## merit selection here
       SPFNucB_Fem1 <- newGenSPFNucB %>% filter(genoA == "a/a" & sex == "F")  %>% top_n(200, merit) 
@@ -129,7 +117,6 @@ for (i in 1:10) {
       
       newGenSPFNucT <- newGenSPFNucT %>% filter (fate == "1")
       
-      newGenSPFNucT <- TBV(newGenSPFNucT) ### converting of merit into TBV
       
       SPFNucT_Fem <- filter(newGenSPFNucT, sex == "F") %>% top_n(200, merit) ## merit selection here
       SPFNucT_Fem1 <- newGenSPFNucT %>% filter(genoA == "a/a" & sex == "F")  %>% top_n(200, merit) 
@@ -176,7 +163,6 @@ for (i in 1:10) {
       
       NewProdPop <- CreatePiglets(Prod_Males, Prod_Females, indexSD, g, paste0("Prod",g,"_"), littersize)
       
-      NewProdPop <- TBV(NewProdPop) ### converting of merit into TBV
       
       NewProd_Females <- NewProdPop %>% filter(sex == "F") %>% top_n(800, merit) 
       NewProd_Females1 <- NewProdPop %>% filter(genoA == "a/a" &  sex == "F") %>% top_n(800, merit) ### higher retention so that there are enough passed down for BW females
@@ -230,11 +216,8 @@ for (i in 1:10) {
       
       NewMultPop <- CreatePiglets(Mult_Males, Mult_Females, indexSD, g, paste0("Mult",g,"_"), littersize)
       
-      NewMultPop <- TBV(NewMultPop) ### converting of merit into TBV
-      
-      
       NewMult_Females <- NewMultPop %>% filter(sex == "F") %>% top_n(5000, merit) ## takes the top 20% of new females created, all that is required. #### increase if I want more PN breeding ###
-
+      
       
       MultPop <- rbind.fill(MultPop, NewMult_Females) %>% mutate(ID = as.character(ID)) %>% distinct()
       
@@ -267,8 +250,6 @@ for (i in 1:10) {
       BW_Males <- BWpop %>% filter(sex == "M") %>% filter(age >= AgeFirstMate) %>% BreedSelection_n(1000) %>% na.omit () ## merit selection on males put into BW pop initially
       
       CommercialPop <- CreatePiglets(BW_Males, BW_Fem_Breed, indexSD, g, paste0("BW",g,"_"), littersize)  
-      
-      CommercialPop <- TBV(CommercialPop) ### converting of merit into TBV
       
       # CommercialPop <-  anti_join(CommercialPop, NewBW_Females, by = "ID") ## new breeders aren't for commercial sale
       
@@ -433,7 +414,6 @@ for (i in 1:10) {
     
     
     MeritAve <- function (popdata) {popdata %>% filter(gen > 0) %>% group_by(gen) %>% dplyr::summarise (MeanMerit = mean(merit)) }
-    TBVAve <- function (popdata) {popdata %>% filter(gen > 0) %>% group_by(gen) %>% dplyr::summarise (MeanTBV = mean(TBV)) }
     
     PropResistant <-  function (popdata) {
       popdata %>% filter (gen > 0) %>%
@@ -445,7 +425,6 @@ for (i in 1:10) {
     PopCount <- function(popdata) {popdata %>% filter(gen > 0) %>% group_by(gen) %>% dplyr::summarise (PopCount = n())}
     
     MeritAveTab <- MeritAve(popdata) 
-    TBVAveTab <- TBVAve(popdata)
     PropResistantTab <- PropResistant(popdata)
     PopCountTab <- PopCount(popdata)
     
@@ -455,7 +434,6 @@ for (i in 1:10) {
     SumStats$gen <- seq(1,121)
     
     SumStats <- left_join(SumStats, MeritAveTab, by = "gen", all.x = TRUE) %>%
-      left_join(TBVAveTab, by = "gen", all.x = TRUE) %>% 
       left_join(PropResistantTab, by = "gen", all.x = TRUE) %>% 
       left_join(PopCountTab, by = "gen", all.x = TRUE) %>%
       left_join(AttemptedAllEdits, by = "gen", all.x= TRUE)
@@ -468,7 +446,6 @@ for (i in 1:10) {
     
     
     MeritAve <- function (popdata) {popdata %>% filter(gen > 0) %>% group_by(gen) %>% dplyr::summarise (MeanMerit = mean(merit)) }
-    TBVAve <- function (popdata) {popdata %>% filter(gen > 0) %>% group_by(gen) %>% dplyr::summarise (MeanTBV = mean(TBV)) }
     
     PropResistant <-  function (popdata) {
       popdata %>% filter (gen > 0) %>%
@@ -480,7 +457,6 @@ for (i in 1:10) {
     PopCount <- function(popdata) {popdata %>% filter(gen > 0) %>% group_by(gen) %>% dplyr::summarise (PopCount = n())}
     
     MeritAveTab <- MeritAve(popdata) 
-    TBVAveTab <- TBVAve(popdata)
     PropResistantTab <- PropResistant(popdata)
     PopCountTab <- PopCount(popdata)
     
@@ -490,7 +466,6 @@ for (i in 1:10) {
     SumStats$gen <- seq(1,121)
     
     SumStats <- left_join(SumStats, MeritAveTab, by = "gen", all.x = TRUE) %>%
-      left_join(TBVAveTab, by = "gen", all.x = TRUE) %>% 
       left_join(PropResistantTab, by = "gen", all.x = TRUE) %>% 
       left_join(PopCountTab, by = "gen", all.x = TRUE) 
     
@@ -506,8 +481,9 @@ for (i in 1:10) {
   
   OutputFile <- cbind(SPFpopAllOutput, ProdPopAllOutput, MultPopAllOutput, BWpopAllOutput, CommercialPopAllOutput)
   
-  write.csv(OutputFile, paste0("SG_MI_Acc1_1Mos_",i,".csv")) 
+  write.csv(OutputFile, paste0("SG_EP_Acc1_0.2Mos_",i,".csv")) 
   
   print(Sys.time())
   
 } #### end of i loop
+
