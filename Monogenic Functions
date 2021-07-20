@@ -1,30 +1,43 @@
 ###### Functions and Values for use in Gene-Editing Simulatins #####
 
-
 ### LIBRARIES ###               
-library (plyr)
 library (dplyr)
+library (plyr)
 library (purrr)
 library (tidyverse)
+library(tidyr)
 library(faux)
+
+## Create BasePop - generations -70 to 0
+
+BurnIn_SPF <- read.csv("BurnIn_SPFpop2020-02-20.csv")
+BurnIn_Prod <- read.csv("BurnIn_ProdPop2020-02-20.csv")
+BurnIn_Mult <- read.csv("BurnIn_MultPop2020-02-20.csv")
+BurnIn_BW <- read.csv("BurnIn_BWpop2020-02-20.csv")
+
+###### Functions and Values for use in Gene-Editing Simulations #####
 
 ################## PARAMETERS/VALUES #########################
 AgeDist <- c(0.092,0.055,0.07,0.09,0.115,0.147,0.189,0.242) ###
-indexSD <- 10
+#indexSD <- 10
 littersize <- 12 ### Increase within functions for simulated 'embryo flushing'
 AgeFirstMate <- 8
 FarrowInt <- 5
 rem <- AgeFirstMate - FarrowInt #### rem = 3. Use %% to select for breeding every 5 months ######
 
 
+######
+########
+True_indexSD <- 10
+gBV_acc <- 1 # 0.8 (medium), 0.5 (low), 1 (high)
+indexSD <- gBV_acc*True_indexSD
+
 ### MI = 0.375 & 0.4 ### EP = 0.6 & 0.25 
 ### AAVex = 0.9 & 0.15 ### AAVi = 0.2 & 0.75
 
-Edit_Efficiency <- 0.375
-Embryo_Survival <-0.4
-GermLineMos <-1
-Accuracy <- 1
-
+Edit_Efficiency <- 0.6
+Embryo_Survival <-0.25
+GermLineMos <-0.2
 
 ########
 
@@ -52,7 +65,7 @@ CreatePiglets <- function (sires, dams, indexSD, genNo, label, littersize){
   piglets$gen <- genNo ##generation associated to loop
   piglets$herd <- siresOrdered2$herd ## Male herd assignation defines tier with no upwards movement in pyramid. 
   piglets$sex <- sample (c("M", "F"), nP, replace = TRUE, prob = c(0.5, 0.5))
-  piglets$merit <- 0.5 * (siresOrdered2$TBV + dams$TBV) + rnorm(nP, 0, indexSD) %>% round(digits = 1) ## average merit of sire and dam with random variation. Sorted according to merit and then TBV asigned to piglets. Both values retained in dataframe
+  piglets$merit <- 0.5 * (siresOrdered2$merit + dams$merit) + rnorm(nP, 0, indexSD) %>% round(digits = 1) ## average merit of sire and dam with random variation. 
   piglets$genoA <- paste(ifelse(sireAlleleA==1,s1A,s2A),ifelse(damAlleleA==1,d1A,d2A), sep = "/") ##pasting the alleles selected from boar and dam
   piglets$age <- -3  ## -3 for creation of piglet and 3 months gestation
   piglets$fate <- 1 
@@ -60,24 +73,9 @@ CreatePiglets <- function (sires, dams, indexSD, genNo, label, littersize){
   piglets$dam <- dams$ID
   piglets$IAV <- ifelse(piglets$genoA == "a/a", "0", "1") ## $10 is cost of IAV/pig
   piglets$EditTrials <- 0 # changes to 1 for editing trial has occured
-  piglets$TBV <- piglets$merit #create new column for TBV - new function adjusts this afterwards
   
   
   return(piglets)
-}
-
-#### Phenotype/TBV function ### 
-
-TBV <- function(piglets){  ## conversion of the EBV to the True Breeding Value
-  
-  piglets$TBV <- rnorm_pre(piglets$TBV, ### TBV is still merit at this stage
-                           mu = mean(piglets$TBV),
-                           sd = sd(piglets$TBV),
-                           r =  Accuracy, ## this is the ACCURACY of selection 
-                           empirical = FALSE)  
-  ### TRUE will always be exact correlation, FALSE has variation that is more likely to exist in a breeding program ###
-  
-  return (piglets)
 }
 
 
@@ -144,7 +142,7 @@ edit_genes <- function(popdata, Edit_Efficiency, Embryo_Survival, GermLineMos) {
     
   } ## end of if function for A ########
   
-
+  
   if (nrow(A_ToEdit) >=1) {
     
     EditedZygotes <- A_ToEdit %>% dplyr::select(ID, genoA) ### ID as identifier and allele only selected from dataframes
@@ -196,7 +194,7 @@ BreedSelection_n <- function (popdata, selection){
                          ifelse(popdata$genoA == "A/a" , 100,
                                 ifelse(popdata$genoA == "a/A" , 100,
                                        ifelse(popdata$genoA == "a/a" , 200, 0))))
-                                             
+  
   
   popdata <- arrange(popdata,-Rank, -merit)
   popdata <- subset(popdata[1:selection, ]) %>% na.omit ()
@@ -215,7 +213,7 @@ BreedSelection_frac <- function (popdata, selection){
                          ifelse(popdata$genoA == "A/a" , 100,
                                 ifelse(popdata$genoA == "a/A" , 100,
                                        ifelse(popdata$genoA == "a/a" , 200, 0))))
-                  
+  
   
   popdata <- arrange(popdata,-Rank, -merit) 
   popdata <- top_frac(popdata, selection, Rank) %>% na.omit ()
